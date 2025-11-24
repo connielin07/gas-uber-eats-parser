@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+      body { background-color: #f5f6fa; }
+      .summary-card { min-height: 130px; }
+      .table td, .table th { vertical-align: middle; }
+      #loading-indicator { display: none; }
+    </style>
+  </head>
+  <body>
+    <div class="container py-4">
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+          <h1 class="h3 mb-1">Uber Eats Dashboard</h1>
+          <p class="text-muted mb-0" id="status-text">載入資料中...</p>
+        </div>
+        <div>
+          <button class="btn btn-outline-primary" onclick="loadData()">重新整理</button>
+        </div>
+      </div>
+
+      <div class="row g-3 mb-4" id="summary-row">
+        <div class="col-md-3">
+          <div class="card shadow-sm border-0 summary-card">
+            <div class="card-body">
+              <p class="text-muted text-uppercase small mb-1">總訂單</p>
+              <p class="fs-3 fw-semibold mb-0" id="summary-totalOrders">0</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card shadow-sm border-0 summary-card">
+            <div class="card-body">
+              <p class="text-muted text-uppercase small mb-1">總金額</p>
+              <p class="fs-3 fw-semibold mb-0" id="summary-totalAmount">$0</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card shadow-sm border-0 summary-card">
+            <div class="card-body">
+              <p class="text-muted text-uppercase small mb-1">本月金額</p>
+              <p class="fs-3 fw-semibold mb-0" id="summary-thisMonthAmount">$0</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card shadow-sm border-0 summary-card">
+            <div class="card-body">
+              <p class="text-muted text-uppercase small mb-1">更新 / 失敗</p>
+              <p class="fs-5 fw-semibold mb-0">
+                <span id="summary-updatedOrders">0</span>
+                <span class="text-muted"> / </span>
+                <span id="summary-errorOrders">0</span>
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card shadow-sm mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <span>最近 20 筆訂單</span>
+          <small class="text-muted" id="last-refreshed">最後更新：-</small>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-hover table-striped mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th style="width: 15%;">日期</th>
+                  <th style="width: 15%;">金額</th>
+                  <th>來源</th>
+                  <th style="width: 15%;">狀態</th>
+                </tr>
+              </thead>
+              <tbody id="orders-body">
+                <tr>
+                  <td colspan="4" class="text-center text-muted py-4">載入資料中...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div id="loading-indicator" class="text-center text-muted">
+        <div class="spinner-border text-primary me-2" role="status"></div>
+        讀取中...
+      </div>
+    </div>
+
+    <script>
+      const currencyFormatter = new Intl.NumberFormat('zh-TW', {
+        style: 'currency',
+        currency: 'TWD',
+        maximumFractionDigits: 0
+      });
+
+      function loadData() {
+        toggleLoading(true);
+        google.script.run
+          .withSuccessHandler(renderDashboard)
+          .withFailureHandler(handleError)
+          .getDashboardData();
+      }
+
+      function renderDashboard(data) {
+        toggleLoading(false);
+        if (!data) {
+          handleError('沒有取回任何資料');
+          return;
+        }
+
+        if (data.summary) {
+          setText('summary-totalOrders', formatNumber(data.summary.totalOrders));
+          setText('summary-totalAmount', currencyFormatter.format(data.summary.totalAmount || 0));
+          setText('summary-thisMonthAmount', currencyFormatter.format(data.summary.thisMonthAmount || 0));
+          setText('summary-updatedOrders', formatNumber(data.summary.updatedOrders));
+          setText('summary-errorOrders', formatNumber(data.summary.errorOrders));
+          setText('last-refreshed', `最後更新：${data.summary.lastRefreshed || '-'}`);
+        }
+
+        if (typeof data.statusMessage === 'string') {
+          setText('status-text', data.statusMessage);
+        }
+
+        renderOrdersTable(data.recent || []);
+      }
+
+      function renderOrdersTable(rows) {
+        const tbody = document.getElementById('orders-body');
+        if (!rows.length) {
+          tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">沒有資料</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = rows.map(row => {
+          const hasAmount = typeof row.amount === 'number' && !isNaN(row.amount);
+          return `
+          <tr>
+            <td>${row.date || '-'}</td>
+            <td>${hasAmount ? currencyFormatter.format(row.amount) : '-'}</td>
+            <td>${escapeHtml(row.source || '')}</td>
+            <td>${renderStatusBadge(row.status)}</td>
+          </tr>
+        `;
+        }).join('');
+      }
+
+      function renderStatusBadge(status) {
+        let badgeClass = 'bg-secondary';
+        let text = status || 'N/A';
+        if (status === 'OK') badgeClass = 'bg-success';
+        else if (status === 'OK_UPDATED') badgeClass = 'bg-info';
+        else if (status === 'PARSE_ERROR') badgeClass = 'bg-danger';
+        return `<span class="badge ${badgeClass}">${text}</span>`;
+      }
+
+      function handleError(err) {
+        toggleLoading(false);
+        const message = typeof err === 'string' ? err : (err && err.message) || '載入失敗';
+        setText('status-text', message);
+        document.getElementById('orders-body').innerHTML =
+          `<tr><td colspan="4" class="text-center text-danger py-4">${message}</td></tr>`;
+      }
+
+      function toggleLoading(isLoading) {
+        document.getElementById('loading-indicator').style.display = isLoading ? 'block' : 'none';
+      }
+
+      function setText(id, text) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+      }
+
+      function formatNumber(num) {
+        return typeof num === 'number' ? num.toLocaleString('zh-TW') : '0';
+      }
+
+      function escapeHtml(str) {
+        return String(str || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
+      document.addEventListener('DOMContentLoaded', loadData);
+    </script>
+  </body>
+</html>
