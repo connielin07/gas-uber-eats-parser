@@ -1,4 +1,6 @@
 const DASHBOARD_TIMEZONE = 'Asia/Taipei';
+const MONTHLY_STATS_SHEET = 'MonthlyStats';
+const WEEKLY_STATS_SHEET = 'WeeklyStats';
 
 function doGet() {
   return HtmlService.createTemplateFromFile('Dashboard')
@@ -65,6 +67,9 @@ function getDashboardData() {
     .sort((a, b) => b.timestamp - a.timestamp)
     .slice(0, 20);
 
+  const monthlyStats = getMonthlyStatsData();
+  const weeklyStats = getWeeklyStatsData();
+
   return {
     summary: {
       totalOrders,
@@ -75,7 +80,9 @@ function getDashboardData() {
       lastRefreshed: Utilities.formatDate(now, tz, 'yyyy/MM/dd HH:mm')
     },
     recent,
-    statusMessage: `共 ${totalOrders} 筆紀錄`
+    statusMessage: `共 ${totalOrders} 筆紀錄`,
+    monthlyStats,
+    weeklyStats
   };
 }
 
@@ -98,4 +105,82 @@ function normalizeDashboardDate(value, tz) {
     timestamp: dateObj.getTime(),
     monthKey: Utilities.formatDate(dateObj, tz, 'yyyy-MM')
   };
+}
+
+function getMonthlyStatsData() {
+  return readStatsSheet(MONTHLY_STATS_SHEET, row => {
+    const monthLabel = formatMonthLabel(row[0]);
+    if (!monthLabel) return null;
+    return {
+      month: monthLabel,
+      totalAmount: toNumber(row[1]),
+      orders: toNumber(row[2]),
+      avgPerOrder: toNumber(row[3])
+    };
+  });
+}
+
+function getWeeklyStatsData() {
+  return readStatsSheet(WEEKLY_STATS_SHEET, row => {
+    const weekKey = formatWeekLabel(row[0]);
+    if (!weekKey) return null;
+    return {
+      weekKey,
+      totalAmount: toNumber(row[1]),
+      month: formatMonthLabel(row[2])
+    };
+  });
+}
+
+function readStatsSheet(sheetName, mapFn) {
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(sheetName);
+  if (!sheet) return [];
+  const values = sheet.getDataRange().getValues();
+  if (values.length <= 1) return [];
+  const rows = values.slice(1);
+  const mapped = [];
+  rows.forEach(row => {
+    const item = mapFn(row);
+    if (item) mapped.push(item);
+  });
+  return mapped;
+}
+
+function formatMonthLabel(value) {
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return Utilities.formatDate(value, DASHBOARD_TIMEZONE, 'yyyy-MM');
+  }
+  const text = value != null ? value.toString().trim() : '';
+  if (!text) return '';
+  return text;
+}
+
+function formatWeekLabel(value) {
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return Utilities.formatDate(value, DASHBOARD_TIMEZONE, 'yyyy-MM-') + getWeekOfMonth(value);
+  }
+  const text = value != null ? value.toString().trim() : '';
+  if (!text) return '';
+  return text;
+}
+
+function getWeekOfMonth(dateObj) {
+  const first = new Date(dateObj.getFullYear(), dateObj.getMonth(), 1);
+  const dayOfWeek = first.getDay() || 7;
+  const offset = dateObj.getDate() + dayOfWeek - 1;
+  return Math.ceil(offset / 7);
+}
+
+function toNumber(value) {
+  if (typeof value === 'number') {
+    return isNaN(value) ? 0 : value;
+  }
+  if (typeof value === 'string') {
+    const num = Number(value.replace(/,/g, ''));
+    return isNaN(num) ? 0 : num;
+  }
+  if (value instanceof Date) {
+    return 0;
+  }
+  return Number(value) || 0;
 }
