@@ -24,78 +24,84 @@ function fetchUberEatsReceipts_HTML() {
     });
   }
 
-  let ok = 0, err = 0, updated = 0;
+  let ok = 0, err = 0, updated = 0, failed = 0;
 
   threads.forEach(thread => {
     thread.getMessages().forEach(msg => {
       const msgId = msg.getId();                 // ★ 只用 msgID 去重
       if (existingMsgId.has(msgId)) return;      // 已處理過 → 跳過
 
-      const html = (msg.getBody() || '').replace(/\u00A0/g, ' ').replace(/\s+/g, ' ');
+      try {
+        const html = (msg.getBody() || '').replace(/\u00A0/g, ' ').replace(/\s+/g, ' ');
 
-      // 是否為「更新收據」信件（簡體）
-      const updateHdr = html.match(
-        /<td[^>]*class="[^"]*Uber18_text_p1[^"]*header_Uber18_text_p1[^"]*"[^>]*>我们更新了您的\s*([^<]*?)\s*收据。?<\/td>/i
-      );
-      const isUpdateMail = !!updateHdr;
+        // 是否為「更新收據」信件（簡體）
+        const updateHdr = html.match(
+          /<td[^>]*class="[^"]*Uber18_text_p1[^"]*header_Uber18_text_p1[^"]*"[^>]*>我们更新了您的\s*([^<]*?)\s*收据。?<\/td>/i
+        );
+        const isUpdateMail = !!updateHdr;
 
-      // 1) 日期
-      const dateSpan = html.match(/<span[^>]*class="[^"]*Uber18_text_p1[^"]*"[^>]*>(.*?)<\/span>/g);
-      let dateIso = '';
-      if (dateSpan) {
-        const dateStr = dateSpan
-          .map(s => stripHtml(s))
-          .find(t => /\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日/.test(t));
-        if (dateStr) dateIso = chineseDateToISO(dateStr); // yyyy-MM-dd
-      }
-      if (!dateIso) {
-        dateIso = Utilities.formatDate(msg.getDate(), tz, 'yyyy-MM-dd');
-      }
+        // 1) 日期
+        const dateSpan = html.match(/<span[^>]*class="[^"]*Uber18_text_p1[^"]*"[^>]*>(.*?)<\/span>/g);
+        let dateIso = '';
+        if (dateSpan) {
+          const dateStr = dateSpan
+            .map(s => stripHtml(s))
+            .find(t => /\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日/.test(t));
+          if (dateStr) dateIso = chineseDateToISO(dateStr); // yyyy-MM-dd
+        }
+        if (!dateIso) {
+          dateIso = Utilities.formatDate(msg.getDate(), tz, 'yyyy-MM-dd');
+        }
 
-      // 2) 金額
-      const amountMatch = html.match(
-        /<span[^>]*class="[^"]*Uber18_text_p2[^"]*"[^>]*>\s*(?:NT|TWD)?\$?\s*([\d,]+(?:\.\d{1,2})?)\s*<\/span>/i
-      );
-      const amountStr = amountMatch ? amountMatch[1].replace(/,/g, '') : '';
-      const amount = amountStr ? Number(amountStr) : NaN;
+        // 2) 金額
+        const amountMatch = html.match(
+          /<span[^>]*class="[^"]*Uber18_text_p2[^"]*"[^>]*>\s*(?:NT|TWD)?\$?\s*([\d,]+(?:\.\d{1,2})?)\s*<\/span>/i
+        );
+        const amountStr = amountMatch ? amountMatch[1].replace(/,/g, '') : '';
+        const amount = amountStr ? Number(amountStr) : NaN;
 
-      // 3) 來源
-      let source = extractMerchant(html) || 'Uber Eats';
+        // 3) 來源
+        let source = extractMerchant(html) || 'Uber Eats';
 
-      // 4) 狀態
-      const canParse = (!isNaN(amount) && amount > 0 && dateIso);
-      if (!canParse) {
-        sheet.appendRow([dateIso, amountStr || '', source || 'Uber Eats', 'PARSE_ERROR', msgId]); // +E
-        existingMsgId.add(msgId);
-        err++;
-        return;
-      }
-
-      if (isUpdateMail) {
-        // 更新模式：找最近一筆相同來源的紀錄，把金額覆寫（找不到就新增）
-        const rowIdx = findLastRowBySource(sheet, source);
-        if (rowIdx > 0) {
-          sheet.getRange(rowIdx, 2).setValue(amountStr);     // B: 金額
-          sheet.getRange(rowIdx, 4).setValue('OK_UPDATED');  // D: 狀態
-          sheet.getRange(rowIdx, 5).setValue(msgId);         // ★ E: MsgID（記錄這封更新信）
+        // 4) 狀態
+        const canParse = (!isNaN(amount) && amount > 0 && dateIso);
+        if (!canParse) {
+          sheet.appendRow([dateIso, amountStr || '', source || 'Uber Eats', 'PARSE_ERROR', msgId]); // +E
           existingMsgId.add(msgId);
-          updated++;
+          err++;
           return;
         }
-        // 找不到既有紀錄 → 新增一列
-        sheet.appendRow([dateIso, amountStr, source, 'OK_UPDATED', msgId]); // +E
+
+        if (isUpdateMail) {
+          // 更新模式：找最近一筆相同來源的紀錄，把金額覆寫（找不到就新增）
+          const rowIdx = findLastRowBySource(sheet, source);
+          if (rowIdx > 0) {
+            sheet.getRange(rowIdx, 2).setValue(amountStr);     // B: 金額
+            sheet.getRange(rowIdx, 4).setValue('OK_UPDATED');  // D: 狀態
+            sheet.getRange(rowIdx, 5).setValue(msgId);         // ★ E: MsgID（記錄這封更新信）
+            existingMsgId.add(msgId);
+            updated++;
+            return;
+          }
+          // 找不到既有紀錄 → 新增一列
+          sheet.appendRow([dateIso, amountStr, source, 'OK_UPDATED', msgId]); // +E
+          existingMsgId.add(msgId);
+          updated++;
+        } else {
+          // 一般收據：新增
+          sheet.appendRow([dateIso, amountStr, source, 'OK', msgId]); // +E
+          existingMsgId.add(msgId);
+          ok++;
+        }
+      } catch (processingError) {
+        failed++;
+        recordProcessingError(sheet, msg, msgId, tz, processingError);
         existingMsgId.add(msgId);
-        updated++;
-      } else {
-        // 一般收據：新增
-        sheet.appendRow([dateIso, amountStr, source, 'OK', msgId]); // +E
-        existingMsgId.add(msgId);
-        ok++;
       }
     });
   });
 
-  Logger.log(`Done. OK=${ok}, UPDATED=${updated}, PARSE_ERROR=${err}`);
+  Logger.log(`Done. OK=${ok}, UPDATED=${updated}, PARSE_ERROR=${err}, PROCESS_ERROR=${failed}`);
 }
 
 // ---- helpers ----
@@ -143,6 +149,20 @@ function findLastRowBySource(sheet, source) {
     }
   }
   return -1;
+}
+
+function recordProcessingError(sheet, msg, msgId, tz, error) {
+  let fallbackDate = '-';
+  try {
+    fallbackDate = msg && typeof msg.getDate === 'function'
+      ? Utilities.formatDate(msg.getDate(), tz, 'yyyy-MM-dd')
+      : '-';
+  } catch (dateErr) {
+    console.error('Failed to format fallback date', dateErr);
+  }
+  const statusNote = `PROCESS_ERROR: ${(error && error.message) || error}`;
+  sheet.appendRow([fallbackDate, '', 'SYSTEM', statusNote, msgId || '']);
+  console.error(`Process error for MsgID=${msgId || 'NA'}`, error);
 }
 
 // ---- triggers ----
