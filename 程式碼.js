@@ -1,5 +1,5 @@
 const SPREADSHEET_ID = '1STKCbgS9Wn-1tJOBhXFDIhl72-TnbYEX2bLVoKfyDhw';
-const SHEET_NAME = '工作表11';
+const SHEET_NAME = '工作表13';
 
 function fetchUberEatsReceipts_HTML() {
   const tz = 'Asia/Taipei';
@@ -143,4 +143,33 @@ function findLastRowBySource(sheet, source) {
     }
   }
   return -1;
+}
+
+// ---- triggers ----
+function ensureDailySyncTrigger() {
+  const handler = 'fetchUberEatsReceipts_HTML';
+  const exists = ScriptApp.getProjectTriggers().some(tr => tr.getHandlerFunction() === handler);
+  if (exists) {
+    return '每日同步觸發器已存在';
+  }
+
+  ScriptApp.newTrigger(handler)
+    .timeBased()
+    .atHour(3) // 每日 03:00（台北時間）
+    .everyDays(1)
+    .create();
+  return '已建立每日同步觸發器（03:00）';
+}
+
+function removeDailySyncTriggers() {
+  const handler = 'fetchUberEatsReceipts_HTML';
+  const triggers = ScriptApp.getProjectTriggers();
+  let removed = 0;
+  triggers.forEach(trigger => {
+    if (trigger.getHandlerFunction() === handler) {
+      ScriptApp.deleteTrigger(trigger);
+      removed++;
+    }
+  });
+  return `已移除 ${removed} 個舊觸發器`;
 }
