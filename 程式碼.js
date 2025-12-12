@@ -66,7 +66,7 @@ function fetchUberEatsReceipts_HTML() {
         // 4) 狀態
         const canParse = (!isNaN(amount) && amount > 0 && dateIso);
         if (!canParse) {
-          sheet.appendRow([dateIso, amountStr || '', source || 'Uber Eats', 'PARSE_ERROR', msgId]); // +E
+          prependRecord(sheet, [dateIso, amountStr || '', source || 'Uber Eats', 'PARSE_ERROR', msgId]); // +E
           existingMsgId.add(msgId);
           err++;
           return;
@@ -84,12 +84,12 @@ function fetchUberEatsReceipts_HTML() {
             return;
           }
           // 找不到既有紀錄 → 新增一列
-          sheet.appendRow([dateIso, amountStr, source, 'OK_UPDATED', msgId]); // +E
+          prependRecord(sheet, [dateIso, amountStr, source, 'OK_UPDATED', msgId]); // +E
           existingMsgId.add(msgId);
           updated++;
         } else {
           // 一般收據：新增
-          sheet.appendRow([dateIso, amountStr, source, 'OK', msgId]); // +E
+          prependRecord(sheet, [dateIso, amountStr, source, 'OK', msgId]); // +E
           existingMsgId.add(msgId);
           ok++;
         }
@@ -161,8 +161,13 @@ function recordProcessingError(sheet, msg, msgId, tz, error) {
     console.error('Failed to format fallback date', dateErr);
   }
   const statusNote = `PROCESS_ERROR: ${(error && error.message) || error}`;
-  sheet.appendRow([fallbackDate, '', 'SYSTEM', statusNote, msgId || '']);
+  prependRecord(sheet, [fallbackDate, '', 'SYSTEM', statusNote, msgId || '']);
   console.error(`Process error for MsgID=${msgId || 'NA'}`, error);
+}
+
+function prependRecord(sheet, values) {
+  sheet.insertRowsAfter(1, 1);
+  sheet.getRange(2, 1, 1, values.length).setValues([values]);
 }
 
 // ---- triggers ----
