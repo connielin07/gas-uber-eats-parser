@@ -1,2 +1,3 @@
+# Ignore local dependencies and log files that shouldn't be pushed to Apps Script.
 node_modules/
 *.log
