@@ -1,6 +1,8 @@
+// 擷取 Uber Eats 電子郵件收據，解析 HTML 後將結構化資料寫入追蹤試算表。
 const SPREADSHEET_ID = '1STKCbgS9Wn-1tJOBhXFDIhl72-TnbYEX2bLVoKfyDhw';
 const SHEET_NAME = '工作表15';
 
+// 同步流程的主要入口：掃描 Gmail、解析訂單資料並回寫到工作表。
 function fetchUberEatsReceipts_HTML() {
   const tz = 'Asia/Taipei';
   const query = 'from:(noreply@uber.com) newer_than:365d';
@@ -8,12 +10,12 @@ function fetchUberEatsReceipts_HTML() {
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(SHEET_NAME);
   Logger.log(`共找到 ${threads.length} 封 thread`);
 
-  // ★ 若 E1 沒標題則補上（E 欄存 MsgID）
+  // 若 E1 沒標題則補上（E 欄存 MsgID）
   if (!sheet.getRange(1, 5).getValue()) {
     sheet.getRange(1, 5).setValue('MsgID'); // E1
   }
 
-  // ★ 載入既有 MsgID 做去重
+  // 載入既有 MsgID 做去重
   const existingMsgId = new Set();
   const last = sheet.getLastRow();
   if (last >= 2) {
@@ -28,7 +30,7 @@ function fetchUberEatsReceipts_HTML() {
 
   threads.forEach(thread => {
     thread.getMessages().forEach(msg => {
-      const msgId = msg.getId();                 // ★ 只用 msgID 去重
+      const msgId = msg.getId();                 // 只用 msgID 去重
       if (existingMsgId.has(msgId)) return;      // 已處理過 → 跳過
 
       try {
@@ -133,10 +135,12 @@ function fetchUberEatsReceipts_HTML() {
   Logger.log(`Done. OK=${ok}, UPDATED=${updated}, PARSE_ERROR=${err}, PROCESS_ERROR=${failed}`);
 }
 
-// ---- helpers ----
+// ---- 工具函式 ----
+// 移除 HTML 標籤並修剪多餘空白，讓後續正規表示式只面對純文字。
 function stripHtml(s) {
   return decodeHtml(String(s).replace(/<[^>]*>/g, '')).trim();
 }
+// 解碼 Uber 樣板常見的 HTML 實體。
 function decodeHtml(s) {
   return s
     .replace(/&amp;/g, '&')
@@ -146,20 +150,25 @@ function decodeHtml(s) {
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, ' ');
 }
+// 將 yyyy年M月D日 格式的文字轉換成 yyyy-MM-dd。
 function chineseDateToISO(s) {
   const m = s.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
   if (!m) return '';
   const y = m[1], mo = pad2(m[2]), d = pad2(m[3]);
   return `${y}-${mo}-${d}`;
 }
+// 將個位數月日補零，確保 ISO 日期文字可正確排序。
 function pad2(x) { x = String(x); return x.length === 1 ? '0' + x : x; }
+// 清理商家顯示文字（壓縮空白並去除首尾空格）。
 function normalizeSource(s) {
   return (s || '').toString().replace(/\s+/g, ' ').trim();
 }
+// 透過移除空白與小寫化建立標準化名稱以便比較。
 function canonicalSource(s) {
   return normalizeSource(s).replace(/\s+/g, '').toLowerCase();
 }
 // 取店名（來源）
+// 嘗試多種在地化樣式，從 Uber 郵件中還原商家／店家名稱。
 function extractMerchant(html) {
   const patterns = [
     /<td[^>]*class="[^"]*Uber18_text_p1[^"]*"[^>]*>您已訂購\s*([^<]*?)\s*的餐[點点]\s*<\/td>/i,
@@ -176,6 +185,7 @@ function extractMerchant(html) {
   return '';
 }
 // 由下往上找「來源」最後一次出現的列（第1列預設表頭：日期,金額,來源,狀態）
+// 從試算表底部往上搜尋，找到該商家最新的一列。
 function findLastRowBySource(sheet, sourceKey) {
   const last = sheet.getLastRow();
   if (last < 2) return -1;
@@ -189,6 +199,7 @@ function findLastRowBySource(sheet, sourceKey) {
   return -1;
 }
 
+// 新增 SYSTEM 紀錄以追蹤特定 MsgID 的處理失敗。
 function recordProcessingError(sheet, msg, msgId, tz, error) {
   let fallbackDate = '-';
   try {
@@ -203,18 +214,21 @@ function recordProcessingError(sheet, msg, msgId, tz, error) {
   console.error(`Process error for MsgID=${msgId || 'NA'}`, error);
 }
 
+// 集中處理 append 行為，避免動到表頭公式並方便日後追蹤。
 function appendRecord(sheet, values) {
-  // Append to keep formulas in header row untouched
+  // 追加新列以維持表頭公式不被覆寫
   sheet.appendRow(values);
   return sheet.getLastRow();
 }
 
+// 回傳有效資料列索引（>1），若無資料則回傳 -1 供呼叫端判斷。
 function getLastDataRow(sheet) {
   const last = sheet.getLastRow();
   return last >= 2 ? last : -1;
 }
 
-// ---- triggers ----
+// ---- 觸發器 ----
+// 建立（若尚未存在）每日觸發器，讓 Gmail 同步自動執行。
 function ensureDailySyncTrigger() {
   const handler = 'fetchUberEatsReceipts_HTML';
   const exists = ScriptApp.getProjectTriggers().some(tr => tr.getHandlerFunction() === handler);
@@ -230,6 +244,7 @@ function ensureDailySyncTrigger() {
   return '已建立每日同步觸發器（03:00）';
 }
 
+// 移除所有指向同步函式的觸發器並回報刪除數量。
 function removeDailySyncTriggers() {
   const handler = 'fetchUberEatsReceipts_HTML';
   const triggers = ScriptApp.getProjectTriggers();

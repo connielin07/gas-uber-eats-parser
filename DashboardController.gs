@@ -1,13 +1,16 @@
+// 提供 Uber Eats 儀表板 UI 以及彙整試算表資料給前端使用。
 const DASHBOARD_TIMEZONE = 'Asia/Taipei';
 const MONTHLY_STATS_SHEET = 'MonthlyStats';
 const WEEKLY_STATS_SHEET = 'WeeklyStats';
 
+// Apps Script doGet：回傳 Dashboard.html 模板供前端載入。
 function doGet() {
   return HtmlService.createTemplateFromFile('Dashboard')
     .evaluate()
     .setTitle('Uber Eats Dashboard');
 }
 
+// 彙總主工作表資料，計算摘要、近期訂單與統計圖表所需的內容。
 function getDashboardData() {
   const tz = DASHBOARD_TIMEZONE;
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(SHEET_NAME);
@@ -100,6 +103,7 @@ function getDashboardData() {
   };
 }
 
+// 標準化工作表中的日期欄位，確保可排序與格式化。
 function normalizeDashboardDate(value, tz) {
   let dateObj = null;
   if (value instanceof Date) {
@@ -128,6 +132,7 @@ function normalizeDashboardDate(value, tz) {
   };
 }
 
+// 讀取「MonthlyStats」並轉成前端圖表可用的物件陣列。
 function getMonthlyStatsData() {
   return readStatsSheet(MONTHLY_STATS_SHEET, row => {
     const monthLabel = formatMonthLabel(row[0]);
@@ -141,6 +146,7 @@ function getMonthlyStatsData() {
   });
 }
 
+// 讀取「WeeklyStats」並轉成週統計圖表資料。
 function getWeeklyStatsData() {
   return readStatsSheet(WEEKLY_STATS_SHEET, row => {
     const weekKey = formatWeekLabel(row[0]);
@@ -153,6 +159,7 @@ function getWeeklyStatsData() {
   });
 }
 
+// 泛用讀表函式：逐列套用 mapFn，忽略空資料。
 function readStatsSheet(sheetName, mapFn) {
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(sheetName);
   if (!sheet) return [];
@@ -167,6 +174,7 @@ function readStatsSheet(sheetName, mapFn) {
   return mapped;
 }
 
+// 將日期或文字轉成 yyyy-MM 月份標籤。
 function formatMonthLabel(value) {
   if (value instanceof Date && !isNaN(value.getTime())) {
     return Utilities.formatDate(value, DASHBOARD_TIMEZONE, 'yyyy-MM');
@@ -176,6 +184,7 @@ function formatMonthLabel(value) {
   return text;
 }
 
+// 產生週標籤（yyyy-MM-第幾週），或回傳原始文字。
 function formatWeekLabel(value) {
   if (value instanceof Date && !isNaN(value.getTime())) {
     return Utilities.formatDate(value, DASHBOARD_TIMEZONE, 'yyyy-MM-') + getWeekOfMonth(value);
@@ -185,6 +194,7 @@ function formatWeekLabel(value) {
   return text;
 }
 
+// 計算指定日期在該月的第幾週。
 function getWeekOfMonth(dateObj) {
   const first = new Date(dateObj.getFullYear(), dateObj.getMonth(), 1);
   const dayOfWeek = first.getDay() || 7;
@@ -192,6 +202,7 @@ function getWeekOfMonth(dateObj) {
   return Math.ceil(offset / 7);
 }
 
+// 將不同型別的值安全地轉成數字。
 function toNumber(value) {
   if (typeof value === 'number') {
     return isNaN(value) ? 0 : value;
@@ -206,6 +217,7 @@ function toNumber(value) {
   return Number(value) || 0;
 }
 
+// 依目前時間與時區推算本週（一～日）的起訖毫秒。
 function getCurrentWeekRange(now, tz) {
   const todayStr = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
   const localDate = new Date(todayStr);
