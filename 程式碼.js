@@ -1,9 +1,9 @@
 const SPREADSHEET_ID = '1STKCbgS9Wn-1tJOBhXFDIhl72-TnbYEX2bLVoKfyDhw';
-const SHEET_NAME = '工作表13';
+const SHEET_NAME = '工作表15';
 
 function fetchUberEatsReceipts_HTML() {
   const tz = 'Asia/Taipei';
-  const query = 'from:(noreply@uber.com) subject:("[LinJay的家庭]") newer_than:365d';
+  const query = 'from:(noreply@uber.com) newer_than:365d';
   const threads = GmailApp.search(query);
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(SHEET_NAME);
   Logger.log(`共找到 ${threads.length} 封 thread`);
@@ -32,13 +32,31 @@ function fetchUberEatsReceipts_HTML() {
       if (existingMsgId.has(msgId)) return;      // 已處理過 → 跳過
 
       try {
-        const html = (msg.getBody() || '').replace(/\u00A0/g, ' ').replace(/\s+/g, ' ');
+        const html = (msg.getBody() || '')
+          .replace(/\u00A0/g, ' ')
+          .replace(/&(nbsp|#160|#xA0);/gi, ' ')
+          .replace(/\s+/g, ' ');
 
         // 是否為「更新收據」信件（簡體）
         const updateHdr = html.match(
           /<td[^>]*class="[^"]*Uber18_text_p1[^"]*header_Uber18_text_p1[^"]*"[^>]*>我们更新了您的\s*([^<]*?)\s*收据。?<\/td>/i
         );
-        const isUpdateMail = !!updateHdr;
+        const adjustBlock = html.match(
+          /<(?:td|div)[^>]*>[\s\S]*?我們已調整了您最近[\s\S]*?訂單的費用總額。[\s\S]*?<\/(?:td|div)>/i
+        );
+        let adjustMerchant = '';
+        if (adjustBlock) {
+          const txt = stripHtml(adjustBlock[0]);
+          const m = txt.match(/我們已調整了您最近\s*(.*?)\s*訂單的費用總額。?/);
+          if (m) adjustMerchant = m[1];
+        }
+        const headerMerchant = adjustMerchant
+          ? decodeHtml(adjustMerchant)
+          : updateHdr
+            ? decodeHtml(updateHdr[1] || '')
+            : '';
+        const isAdjustMail = !!adjustBlock;
+        const isUpdateMail = !!(updateHdr || adjustBlock);
 
         // 1) 日期
         const dateSpan = html.match(/<span[^>]*class="[^"]*Uber18_text_p1[^"]*"[^>]*>(.*?)<\/span>/g);
@@ -54,28 +72,38 @@ function fetchUberEatsReceipts_HTML() {
         }
 
         // 2) 金額
+        let amountStr = '';
         const amountMatch = html.match(
           /<span[^>]*class="[^"]*Uber18_text_p2[^"]*"[^>]*>\s*(?:NT|TWD)?\$?\s*([\d,]+(?:\.\d{1,2})?)\s*<\/span>/i
         );
-        const amountStr = amountMatch ? amountMatch[1].replace(/,/g, '') : '';
+        if (amountMatch) {
+          amountStr = amountMatch[1].replace(/,/g, '');
+        } else {
+          const fareTd = html.match(
+            /<td[^>]*class="[^"]*total-fare-amount[^"]*"[^>]*>\s*(?:NT|TWD)?\$?\s*([\d,]+(?:\.\d{1,2})?)\s*<\/td>/i
+          );
+          if (fareTd) amountStr = fareTd[1].replace(/,/g, '');
+        }
         const amount = amountStr ? Number(amountStr) : NaN;
 
         // 3) 來源
-        let source = extractMerchant(html) || 'Uber Eats';
+        const sourceDisplay = normalizeSource(headerMerchant || extractMerchant(html) || 'Uber Eats');
+        const sourceKey = canonicalSource(sourceDisplay);
 
         // 4) 狀態
-        const canParse = (!isNaN(amount) && amount > 0 && dateIso);
+        const canParse = (!isNaN(amount) && amount >= 0 && dateIso);
         if (!canParse) {
-          prependRecord(sheet, [dateIso, amountStr || '', source || 'Uber Eats', 'PARSE_ERROR', msgId]); // +E
+          appendRecord(sheet, [dateIso, amountStr || '', sourceDisplay || 'Uber Eats', 'PARSE_ERROR', msgId]); // +E
           existingMsgId.add(msgId);
           err++;
           return;
         }
 
         if (isUpdateMail) {
-          // 更新模式：找最近一筆相同來源的紀錄，把金額覆寫（找不到就新增）
-          const rowIdx = findLastRowBySource(sheet, source);
+          // 更新模式：新版 class 直接覆寫上一筆，舊版維持依來源比對
+          let rowIdx = isAdjustMail ? getLastDataRow(sheet) : findLastRowBySource(sheet, sourceKey);
           if (rowIdx > 0) {
+            Logger.log(`[UPDATE] Found row ${rowIdx} for ${sourceDisplay}`);
             sheet.getRange(rowIdx, 2).setValue(amountStr);     // B: 金額
             sheet.getRange(rowIdx, 4).setValue('OK_UPDATED');  // D: 狀態
             sheet.getRange(rowIdx, 5).setValue(msgId);         // ★ E: MsgID（記錄這封更新信）
@@ -83,13 +111,14 @@ function fetchUberEatsReceipts_HTML() {
             updated++;
             return;
           }
+          Logger.log(`[UPDATE] No match for ${sourceDisplay}, appending new row`);
           // 找不到既有紀錄 → 新增一列
-          prependRecord(sheet, [dateIso, amountStr, source, 'OK_UPDATED', msgId]); // +E
+          appendRecord(sheet, [dateIso, amountStr, sourceDisplay, 'OK_UPDATED', msgId]); // +E
           existingMsgId.add(msgId);
           updated++;
         } else {
           // 一般收據：新增
-          prependRecord(sheet, [dateIso, amountStr, source, 'OK', msgId]); // +E
+          appendRecord(sheet, [dateIso, amountStr, sourceDisplay, 'OK', msgId]); // +E
           existingMsgId.add(msgId);
           ok++;
         }
@@ -124,6 +153,12 @@ function chineseDateToISO(s) {
   return `${y}-${mo}-${d}`;
 }
 function pad2(x) { x = String(x); return x.length === 1 ? '0' + x : x; }
+function normalizeSource(s) {
+  return (s || '').toString().replace(/\s+/g, ' ').trim();
+}
+function canonicalSource(s) {
+  return normalizeSource(s).replace(/\s+/g, '').toLowerCase();
+}
 // 取店名（來源）
 function extractMerchant(html) {
   const patterns = [
@@ -131,6 +166,8 @@ function extractMerchant(html) {
     /<td[^>]*class="[^"]*Uber18_text_p1[^"]*"[^>]*>您在\s*([^<]*?)\s*下了?[訂订][單单]\s*<\/td>/i,
     /<td[^>]*class="[^"]*Uber18_text_p1[^"]*"[^>]*>您在\s*([^<]*?)\s*下單\s*<\/td>/i,
     /<td[^>]*class="[^"]*Uber18_text_p1[^"]*"[^>]*>(?:You ordered from|You placed an order at)\s*([^<]*?)\s*<\/td>/i,
+    /<(?:td|div)[^>]*>以下是您在\s*([^<]*?)\s*訂購[^<]*<\/(?:td|div)>/i,
+    /<(?:td|div)[^>]*>我們已調整了您最近\s*([^<]*?)\s*訂單的費用總額。<\/(?:td|div)>/i,
   ];
   for (const re of patterns) {
     const m = html.match(re);
@@ -139,12 +176,13 @@ function extractMerchant(html) {
   return '';
 }
 // 由下往上找「來源」最後一次出現的列（第1列預設表頭：日期,金額,來源,狀態）
-function findLastRowBySource(sheet, source) {
+function findLastRowBySource(sheet, sourceKey) {
   const last = sheet.getLastRow();
   if (last < 2) return -1;
+  const target = canonicalSource(sourceKey);
   const values = sheet.getRange(2, 1, last - 1, 4).getValues(); // A2:D
   for (let i = values.length - 1; i >= 0; i--) {
-    if ((values[i][2] || '').toString().trim() === source) {
+    if (canonicalSource(values[i][2]) === target) {
       return i + 2; // 轉回實際列號
     }
   }
@@ -161,13 +199,19 @@ function recordProcessingError(sheet, msg, msgId, tz, error) {
     console.error('Failed to format fallback date', dateErr);
   }
   const statusNote = `PROCESS_ERROR: ${(error && error.message) || error}`;
-  prependRecord(sheet, [fallbackDate, '', 'SYSTEM', statusNote, msgId || '']);
+  appendRecord(sheet, [fallbackDate, '', 'SYSTEM', statusNote, msgId || '']);
   console.error(`Process error for MsgID=${msgId || 'NA'}`, error);
 }
 
-function prependRecord(sheet, values) {
-  sheet.insertRowsAfter(1, 1);
-  sheet.getRange(2, 1, 1, values.length).setValues([values]);
+function appendRecord(sheet, values) {
+  // Append to keep formulas in header row untouched
+  sheet.appendRow(values);
+  return sheet.getLastRow();
+}
+
+function getLastDataRow(sheet) {
+  const last = sheet.getLastRow();
+  return last >= 2 ? last : -1;
 }
 
 // ---- triggers ----
