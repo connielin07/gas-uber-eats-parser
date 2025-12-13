@@ -29,16 +29,8 @@
         <div class="col-md-3">
           <div class="card shadow-sm border-0 summary-card">
             <div class="card-body">
-              <p class="text-muted text-uppercase small mb-1">總訂單</p>
-              <p class="fs-3 fw-semibold mb-0" id="summary-totalOrders">0</p>
-            </div>
-          </div>
-        </div>
-        <div class="col-md-3">
-          <div class="card shadow-sm border-0 summary-card">
-            <div class="card-body">
-              <p class="text-muted text-uppercase small mb-1">總金額</p>
-              <p class="fs-3 fw-semibold mb-0" id="summary-totalAmount">$0</p>
+              <p class="text-muted text-uppercase small mb-1">本週金額</p>
+              <p class="fs-3 fw-semibold mb-0" id="summary-thisWeekAmount">$0</p>
             </div>
           </div>
         </div>
@@ -47,6 +39,14 @@
             <div class="card-body">
               <p class="text-muted text-uppercase small mb-1">本月金額</p>
               <p class="fs-3 fw-semibold mb-0" id="summary-thisMonthAmount">$0</p>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="card shadow-sm border-0 summary-card">
+            <div class="card-body">
+              <p class="text-muted text-uppercase small mb-1">今年金額</p>
+              <p class="fs-3 fw-semibold mb-0" id="summary-thisYearAmount">$0</p>
             </div>
           </div>
         </div>
@@ -146,9 +146,9 @@
         }
 
         if (data.summary) {
-          setText('summary-totalOrders', formatNumber(data.summary.totalOrders));
-          setText('summary-totalAmount', currencyFormatter.format(data.summary.totalAmount || 0));
+          setText('summary-thisWeekAmount', currencyFormatter.format(data.summary.thisWeekAmount || 0));
           setText('summary-thisMonthAmount', currencyFormatter.format(data.summary.thisMonthAmount || 0));
+          setText('summary-thisYearAmount', currencyFormatter.format(data.summary.thisYearAmount || 0));
           setText('summary-updatedOrders', formatNumber(data.summary.updatedOrders));
           setText('summary-errorOrders', formatNumber(data.summary.errorOrders));
           setText('last-refreshed', `最後更新：${data.summary.lastRefreshed || '-'}`);

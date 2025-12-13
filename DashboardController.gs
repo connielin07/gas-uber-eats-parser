@@ -16,7 +16,9 @@ function getDashboardData() {
     totalAmount: 0,
     updatedOrders: 0,
     errorOrders: 0,
+    thisWeekAmount: 0,
     thisMonthAmount: 0,
+    thisYearAmount: 0,
     lastRefreshed: Utilities.formatDate(new Date(), tz, 'yyyy/MM/dd HH:mm')
   };
   if (!sheet) {
@@ -35,12 +37,16 @@ function getDashboardData() {
 
   const now = new Date();
   const thisMonthKey = Utilities.formatDate(now, tz, 'yyyy-MM');
+  const currentYear = Utilities.formatDate(now, tz, 'yyyy');
+  const weekRange = getCurrentWeekRange(now, tz);
 
   let totalAmount = 0;
   let totalOrders = 0;
   let updatedOrders = 0;
   let errorOrders = 0;
   let thisMonthAmount = 0;
+  let thisWeekAmount = 0;
+  let thisYearAmount = 0;
 
   const parsedRows = rows.map(row => {
     const normalized = normalizeDashboardDate(row[0], tz);
@@ -52,6 +58,12 @@ function getDashboardData() {
     if (status === 'PARSE_ERROR') errorOrders++;
     if (normalized.monthKey === thisMonthKey) {
       thisMonthAmount += amountNum;
+    }
+    if (!isNaN(normalized.dayMs) && normalized.dayMs >= weekRange.startMs && normalized.dayMs < weekRange.endMs) {
+      thisWeekAmount += amountNum;
+    }
+    if (normalized.yearKey === currentYear) {
+      thisYearAmount += amountNum;
     }
 
     return {
@@ -76,7 +88,9 @@ function getDashboardData() {
       totalAmount,
       updatedOrders,
       errorOrders,
+      thisWeekAmount,
       thisMonthAmount,
+      thisYearAmount,
       lastRefreshed: Utilities.formatDate(now, tz, 'yyyy/MM/dd HH:mm')
     },
     recent,
@@ -97,13 +111,20 @@ function normalizeDashboardDate(value, tz) {
   }
 
   if (!(dateObj instanceof Date) || isNaN(dateObj.getTime())) {
-    return { display: '-', timestamp: 0, monthKey: '' };
+    return { display: '-', timestamp: 0, monthKey: '', yearKey: '', dayMs: NaN };
   }
 
+  const display = Utilities.formatDate(dateObj, tz, 'yyyy-MM-dd');
+  const monthKey = Utilities.formatDate(dateObj, tz, 'yyyy-MM');
+  const yearKey = Utilities.formatDate(dateObj, tz, 'yyyy');
+  const dayMs = new Date(display).getTime();
+
   return {
-    display: Utilities.formatDate(dateObj, tz, 'yyyy-MM-dd'),
+    display,
     timestamp: dateObj.getTime(),
-    monthKey: Utilities.formatDate(dateObj, tz, 'yyyy-MM')
+    monthKey,
+    yearKey,
+    dayMs
   };
 }
 
@@ -183,4 +204,19 @@ function toNumber(value) {
     return 0;
   }
   return Number(value) || 0;
+}
+
+function getCurrentWeekRange(now, tz) {
+  const todayStr = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+  const localDate = new Date(todayStr);
+  const dayOfWeek = Number(Utilities.formatDate(now, tz, 'u')) || 1; // Monday = 1
+  const start = new Date(localDate);
+  start.setUTCDate(start.getUTCDate() - (dayOfWeek - 1));
+  start.setUTCHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 7);
+  return {
+    startMs: start.getTime(),
+    endMs: end.getTime()
+  };
 }
