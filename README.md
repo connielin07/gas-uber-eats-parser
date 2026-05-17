@@ -46,6 +46,15 @@ Google Sheets
     ↓
 Dashboard / Statistics View
 
+## Demo
+
+- [Video](https://drive.google.com/file/d/1QcPkBdlXryhT8pE2L7oAT6jvbNndqfB4/view?usp=sharing)
+
+## Docs
+
+- [Report](https://docs.google.com/document/d/1hv5QwfhuxXrQkq5bKuJhLAvPtmU5az3nIVTiSJEvkXs/edit?usp=sharing)
+- [Presentation](https://canva.link/q4j2buap12l9wcz)
+  
 ## Course Connection
 
 | Course | Connection |
